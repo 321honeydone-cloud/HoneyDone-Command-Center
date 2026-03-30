@@ -168,8 +168,7 @@ async function fetchJobberClients(token) {
 }
 
 function parseJobberCSV(text) {
-  const lines = text.trim().split("
-");
+  const lines = text.trim().split("\n");
   if (lines.length < 2) return [];
   const headers = lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
   const col = (row,...keys) => { for(const k of keys){const i=headers.findIndex(h=>h.includes(k));if(i>=0&&row[i])return row[i].replace(/"/g,"").trim();} return ""; };
