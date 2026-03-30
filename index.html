@@ -340,21 +340,21 @@ JOB: ${quote.jobTitle} | ${cat} | ${city}
 ~${quote.estimatedHours}h | ${quote.tripCount} trip(s) | ${ctype}
 
 SCOPE:
-${quote.scopeOfWork?.map((s,i)=>`${i+1}. ${s}`).join("")}
+${quote.scopeOfWork?.map((s,i)=>`${i+1}. ${s}`).join("\n")}
 
 LINE ITEMS:
 ${trip?`Trip Fee — $${trip.total?.toFixed(2)}
-`:""}${work.map(l=>`${l.description} — $${l.total?.toFixed(2)}`).join("")}
+`:""}${work.map(l=>`${l.description} — $${l.total?.toFixed(2)}`).join("\n")}
 
 MATERIALS:
-${quote.materials?.map(m=>`${m.item} (${m.qty} ${m.unit}) — $${m.total?.toFixed(2)}`).join("")}
+${quote.materials?.map(m=>`${m.item} (${m.qty} ${m.unit}) — $${m.total?.toFixed(2)}`).join("\n")}
 
 Services: $${quote.laborSubtotal?.toFixed(2)}
 Materials: $${quote.materialsSubtotal?.toFixed(2)}
 Contingency: $${quote.contingency?.toFixed(2)}
 TOTAL: $${quote.grandTotal?.toFixed(2)}
 
-${quote.exclusions?.map(e=>`• ${e}`).join("")}
+${quote.exclusions?.map(e=>`• ${e}`).join("\n")}
 
 Valid 30 days. All work warranted.`;
     navigator.clipboard.writeText(txt);
@@ -403,7 +403,7 @@ Valid 30 days. All work warranted.`;
           <div style={G.card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <span style={G.lbl}>Materials</span>
-              <a href={`https://www.homedepot.com/s/${encodeURIComponent(quote.materials?.map(m=>m.item).join(""))}`} target="_blank" rel="noreferrer" style={{fontFamily:"'Barlow Condensed','Arial Narrow',sans-serif",fontWeight:700,fontSize:11,letterSpacing:"0.12em",textTransform:"uppercase",color:"#f97316",textDecoration:"none",background:"#1a1008",border:"1px solid #3a2008",borderRadius:5,padding:"5px 11px"}}>🛒 Shop All HD</a>
+              <a href={`https://www.homedepot.com/s/${encodeURIComponent(quote.materials?.map(m=>m.item).join("\n"))}`} target="_blank" rel="noreferrer" style={{fontFamily:"'Barlow Condensed','Arial Narrow',sans-serif",fontWeight:700,fontSize:11,letterSpacing:"0.12em",textTransform:"uppercase",color:"#f97316",textDecoration:"none",background:"#1a1008",border:"1px solid #3a2008",borderRadius:5,padding:"5px 11px"}}>🛒 Shop All HD</a>
             </div>
             <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Item","Qty","Total",""].map(h=><th key={h} style={{textAlign:h===""||h==="Total"?"right":"left",fontSize:10,color:"#2e3a44",letterSpacing:"0.16em",textTransform:"uppercase",paddingBottom:10,borderBottom:"1px solid #1c2228"}}>{h}</th>)}</tr></thead><tbody>{quote.materials?.map((m,i)=><tr key={i} style={{borderBottom:"1px solid #111618"}}><td style={{padding:"9px 0",fontSize:13,fontWeight:300,color:"#a8a098"}}>{m.item}</td><td style={{fontSize:13,color:"#5a6a78",padding:"9px 0"}}>{m.qty} {m.unit}</td><td style={{textAlign:"right",fontSize:13,fontWeight:500,color:"#d8d0c4",padding:"9px 0"}}>${m.total?.toFixed(2)}</td><td style={{textAlign:"right",padding:"9px 0 9px 10px"}}><a href={`https://www.homedepot.com/s/${encodeURIComponent(m.item)}`} target="_blank" rel="noreferrer" style={{fontFamily:"'Barlow Condensed','Arial Narrow',sans-serif",fontWeight:700,fontSize:10,color:"#f97316",textDecoration:"none",background:"#1a1008",border:"1px solid #3a2008",borderRadius:4,padding:"3px 8px"}}>HD ↗</a></td></tr>)}</tbody></table>
           </div>
@@ -505,7 +505,7 @@ function QuickDial() {
   const csvRef=useRef(null);
 
   const avColors={"Property Manager":"linear-gradient(135deg,#f0b020,#d4920a)","Client":"linear-gradient(135deg,#60a5fa,#3b82f6)","Supplier":"linear-gradient(135deg,#a78bfa,#7c3aed)","Subcontractor":"linear-gradient(135deg,#34d399,#059669)"};
-  const initials=n=>n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  const initials=n=>n.split(" ").map(w=>w[0]).join("\n").slice(0,2).toUpperCase();
   const filtered=filter==="All"?contacts:contacts.filter(c=>c.role===filter);
 
   const loadFromDrive=async()=>{
