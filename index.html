@@ -340,25 +340,21 @@ JOB: ${quote.jobTitle} | ${cat} | ${city}
 ~${quote.estimatedHours}h | ${quote.tripCount} trip(s) | ${ctype}
 
 SCOPE:
-${quote.scopeOfWork?.map((s,i)=>`${i+1}. ${s}`).join("
-")}
+${quote.scopeOfWork?.map((s,i)=>`${i+1}. ${s}`).join(" ")}
 
 LINE ITEMS:
 ${trip?`Trip Fee — $${trip.total?.toFixed(2)}
-`:""}${work.map(l=>`${l.description} — $${l.total?.toFixed(2)}`).join("
-")}
+`:""}${work.map(l=>`${l.description} — $${l.total?.toFixed(2)}`).join(" ")}
 
 MATERIALS:
-${quote.materials?.map(m=>`${m.item} (${m.qty} ${m.unit}) — $${m.total?.toFixed(2)}`).join("
-")}
+${quote.materials?.map(m=>`${m.item} (${m.qty} ${m.unit}) — $${m.total?.toFixed(2)}`).join(" ")}
 
 Services: $${quote.laborSubtotal?.toFixed(2)}
 Materials: $${quote.materialsSubtotal?.toFixed(2)}
 Contingency: $${quote.contingency?.toFixed(2)}
 TOTAL: $${quote.grandTotal?.toFixed(2)}
 
-${quote.exclusions?.map(e=>`• ${e}`).join("
-")}
+${quote.exclusions?.map(e=>`• ${e}`).join(" ")}
 
 Valid 30 days. All work warranted.`;
     navigator.clipboard.writeText(txt);
@@ -486,9 +482,7 @@ Valid 30 days. All work warranted.`;
       </div>
       <div style={G.card}>
         <span style={G.lbl}>Job Description{media.length>0?" — Optional":""}</span>
-        <textarea style={{...G.inp,resize:"vertical",lineHeight:1.8}} rows={5} value={desc} onChange={e=>setDesc(e.target.value)} placeholder={"Talk it out like you're planning the job.
-
-Example: PM sent a work order for a Rockledge rental. Back door drags, deadbolt won't line up. GFCI in garage is dead. Mid-90s house."}/>
+        <textarea style={{...G.inp,resize:"vertical",lineHeight:1.8}} rows={5} value={desc} onChange={e=>setDesc(e.target.value)} placeholder={"Talk it out like you're planning the job. Example: PM sent a work order for a Rockledge rental. Back door drags, deadbolt won't line up. GFCI in garage is dead. Mid-90s house."}/>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}>
           <span style={{fontSize:11,color:"#1e2830"}}>Builds estimate + saves to Sheets automatically</span>
           <button style={{...G.btnGold,opacity:(!desc.trim()&&media.length===0)||loading?0.4:1}} onClick={generate} disabled={(!desc.trim()&&media.length===0)||loading}>{loading?"Building...":"Generate →"}</button>
