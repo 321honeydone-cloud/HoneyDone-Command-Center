@@ -264,6 +264,12 @@ function buildMapsUrl(address, currentLocation) {
   return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
 }
 
+function buildMapEmbedUrl(address) {
+  const destination = encodeURIComponent(address || "");
+  if (!destination) return "";
+  return `https://www.google.com/maps?q=${destination}&output=embed`;
+}
+
 function formatDuration(minutes) {
   if (!Number.isFinite(minutes) || minutes <= 0) return "";
 
@@ -334,6 +340,7 @@ export default function App() {
   const [clientSearch, setClientSearch] = useState("");
   const [clientStatus, setClientStatus] = useState({ loading: true, error: "" });
   const [currentLocation, setCurrentLocation] = useState(null);
+  const [locationRequested, setLocationRequested] = useState(false);
   const [routeStatus, setRouteStatus] = useState({ loading: false, error: "", duration: "", distance: "" });
 
   useEffect(() => {
@@ -411,6 +418,7 @@ export default function App() {
   const clientOptions = activeClients.length ? activeClients : allClients;
   const prepChecklistItems = useMemo(() => getQuoteChecklist(selectedPrepQuote), [selectedPrepQuote]);
   const mapsUrl = buildMapsUrl(selectedPrepQuote?.address, currentLocation);
+  const mapEmbedUrl = buildMapEmbedUrl(selectedPrepQuote?.address);
   const stats = [
     ["Open Quotes", appState.quotes.length],
     ["Quoted Value", money(openQuoteValue)],
@@ -497,6 +505,14 @@ export default function App() {
     };
   }, [currentLocation, selectedPrepQuote?.address]);
 
+  useEffect(() => {
+    if (activeTab !== "prep" || !selectedPrepQuote?.address || currentLocation || locationRequested) {
+      return;
+    }
+
+    useCurrentLocation();
+  }, [activeTab, selectedPrepQuote?.address, currentLocation, locationRequested]);
+
   const onQuoteField = ({ target: { name, value } }) => {
     setEstimateResult(null);
     setEstimateError("");
@@ -553,6 +569,8 @@ export default function App() {
   };
 
   const useCurrentLocation = () => {
+    setLocationRequested(true);
+
     if (!navigator.geolocation) {
       setRouteStatus({ loading: false, error: "Geolocation is not available in this browser.", duration: "", distance: "" });
       return;
@@ -946,7 +964,7 @@ export default function App() {
           <div className="two-column">
             <article className="card">
               <div className="card-header"><div><p className="section-kicker">Mission Brief</p><h3>Load the truck with intent</h3></div></div>
-              {selectedPrepQuote ? <div className="prep-summary"><span>{selectedPrepQuote.id}</span><strong>{selectedPrepQuote.clientName}</strong><p>{selectedPrepQuote.service} at {selectedPrepQuote.address || selectedPrepQuote.city || "Brevard County property"}.</p><div className="prep-grid"><div><span>Trip Fee</span><strong>{money(getQuoteTripFee(selectedPrepQuote))}</strong></div><div><span>Estimated Hours</span><strong>{getQuoteHours(selectedPrepQuote)}</strong></div><div><span>Urgency</span><strong>{formatUrgencyLabel(selectedPrepQuote.urgency)}</strong></div></div><div className="mini-panel"><span>Truck Loadout</span><p>{getQuotePrep(selectedPrepQuote).join(", ") || "Generate an estimate to build the loadout."}</p></div><div className="mini-panel"><span>Drive Route</span><p>{selectedPrepQuote.address || "Quote address missing."}</p><div className="route-meta"><div><span>Origin</span><strong>{currentLocation ? "Current location locked" : "Current location not set"}</strong></div><div><span>ETA</span><strong>{routeStatus.loading ? "Checking..." : routeStatus.duration || "Tap current location"}</strong></div><div><span>Distance</span><strong>{routeStatus.distance || "-"}</strong></div></div>{routeStatus.error ? <p>{routeStatus.error}</p> : null}<div className="client-actions">{selectedPrepQuote.address ? <a className="mini-action" href={mapsUrl || buildMapsUrl(selectedPrepQuote.address)} target="_blank" rel="noreferrer">Google Maps</a> : null}<button className="mini-action mini-action-button" type="button" onClick={useCurrentLocation}>Use Current Location</button></div></div>{selectedPrepQuote.estimate?.smartAddOns?.length ? <div className="mini-panel"><span>Smart Add-Ons</span><p>{selectedPrepQuote.estimate.smartAddOns.join(" | ")}</p></div> : null}</div> : <div className="empty-state">Save a quote first to generate the mission brief.</div>}
+              {selectedPrepQuote ? <div className="prep-summary"><span>{selectedPrepQuote.id}</span><strong>{selectedPrepQuote.clientName}</strong><p>{selectedPrepQuote.service} at {selectedPrepQuote.address || selectedPrepQuote.city || "Brevard County property"}.</p><div className="prep-grid"><div><span>Trip Fee</span><strong>{money(getQuoteTripFee(selectedPrepQuote))}</strong></div><div><span>Estimated Hours</span><strong>{getQuoteHours(selectedPrepQuote)}</strong></div><div><span>Urgency</span><strong>{formatUrgencyLabel(selectedPrepQuote.urgency)}</strong></div></div><div className="mini-panel"><span>Truck Loadout</span><p>{getQuotePrep(selectedPrepQuote).join(", ") || "Generate an estimate to build the loadout."}</p></div><div className="mini-panel"><span>Drive Route</span><p>{selectedPrepQuote.address || "Quote address missing."}</p>{mapEmbedUrl ? <div className="map-frame-wrap"><iframe className="map-frame" title="Job location map" src={mapEmbedUrl} loading="lazy" referrerPolicy="no-referrer-when-downgrade" /></div> : null}<div className="route-meta"><div><span>Origin</span><strong>{currentLocation ? "Current location shared" : "Waiting on browser permission"}</strong></div><div><span>ETA</span><strong>{routeStatus.loading ? "Checking..." : routeStatus.duration || "Allow location access"}</strong></div><div><span>Distance</span><strong>{routeStatus.distance || "-"}</strong></div></div>{routeStatus.error ? <p>{routeStatus.error}</p> : <p>Browser location permission is used to calculate drive time from where you are now.</p>}<div className="client-actions">{selectedPrepQuote.address ? <a className="mini-action" href={mapsUrl || buildMapsUrl(selectedPrepQuote.address)} target="_blank" rel="noreferrer">Google Maps</a> : null}<button className="mini-action mini-action-button" type="button" onClick={useCurrentLocation}>Retry Location</button></div></div>{selectedPrepQuote.estimate?.smartAddOns?.length ? <div className="mini-panel"><span>Smart Add-Ons</span><p>{selectedPrepQuote.estimate.smartAddOns.join(" | ")}</p></div> : null}</div> : <div className="empty-state">Save a quote first to generate the mission brief.</div>}
             </article>
             <article className="card">
               <div className="card-header"><div><p className="section-kicker">Departure Checklist</p><h3>Tools and materials to load</h3></div></div>
