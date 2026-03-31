@@ -269,7 +269,7 @@ export default function App() {
   const [activeClients, setActiveClients] = useState([]);
   const [allClients, setAllClients] = useState([]);
   const [clientSearch, setClientSearch] = useState("");
-  const [clientStatus, setClientStatus] = useState({ loading: true, error: "" });
+  const [clientStatus, setClientStatus] = useState({ loading: true, error: "", warning: "" });
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(appState));
@@ -283,7 +283,7 @@ export default function App() {
     let cancelled = false;
 
     async function loadClients() {
-      setClientStatus({ loading: true, error: "" });
+      setClientStatus({ loading: true, error: "", warning: "" });
 
       try {
         const [activeResponse, allResponse] = await Promise.all([
@@ -296,22 +296,26 @@ export default function App() {
           allResponse.json()
         ]);
 
-        if (!activeResponse.ok || activeData.success === false) {
-          throw new Error(activeData.error || "Active clients failed to load.");
-        }
-
         if (!allResponse.ok || allData.success === false) {
           throw new Error(allData.error || "Full client list failed to load.");
         }
 
+        const fullClients = allData.clients || [];
+        const activeClientRecords = activeResponse.ok && activeData.success !== false
+          ? (activeData.clients || [])
+          : fullClients;
+        const warning = activeResponse.ok && activeData.success !== false
+          ? ""
+          : "Active client feed is unavailable right now, so the app is using the full client list for the quote dropdown.";
+
         if (!cancelled) {
-          setActiveClients(activeData.clients || []);
-          setAllClients(allData.clients || []);
-          setClientStatus({ loading: false, error: "" });
+          setActiveClients(activeClientRecords);
+          setAllClients(fullClients);
+          setClientStatus({ loading: false, error: "", warning });
         }
       } catch (error) {
         if (!cancelled) {
-          setClientStatus({ loading: false, error: error.message || "Client sync failed." });
+          setClientStatus({ loading: false, error: error.message || "Client sync failed.", warning: "" });
         }
       }
     }
@@ -349,9 +353,9 @@ export default function App() {
     const haystack = [client.name, client.city, client.phone, client.email, client.address].join(" ").toLowerCase();
     return haystack.includes(clientSearch.toLowerCase());
   }), [allClients, clientSearch]);
-  const dataQualityMessage = allClients.length && !reachableClients
+  const dataQualityMessage = clientStatus.warning || (allClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
-    : "";
+    : "");
 
   const onQuoteField = ({ target: { name, value } }) => {
     setEstimateResult(null);
@@ -669,6 +673,7 @@ export default function App() {
               </div>
               {clientStatus.loading ? <div className="empty-state">Loading client lists...</div> : null}
               {clientStatus.error ? <div className="empty-state">{clientStatus.error}</div> : null}
+              {clientStatus.warning ? <div className="empty-state">{clientStatus.warning}</div> : null}
               {!clientStatus.loading && !clientStatus.error ? <div className="client-directory">
                 {filteredClients.length ? filteredClients.map((client) => <article className="client-row" key={`${client.name}-${client.address}`}>
                   <div className="client-main">
