@@ -3,13 +3,6 @@ import { appsScriptUrl, defaultState, quickLinks, serviceCatalog, serviceZones, 
 import logoImage from "./assets/logo-shirt-front.png";
 
 const tabs = ["overview", "quotes", "prep", "closeout", "contacts"];
-const checklistItems = [
-  "Confirm customer arrival window",
-  "Load specialty tools",
-  "Pack surface protection",
-  "Verify materials on hand",
-  "Review scope and upsell opportunities"
-];
 const apiKeyStorageKey = "honeydone-openai-api-key";
 const estimatorModel = "gpt-4o-mini";
 const blankQuoteForm = {
@@ -251,11 +244,68 @@ function getQuoteTripFee(quote) {
   return quote.tripFee || quote.estimate?.pricingBuild?.tripFee || 100;
 }
 
+function getQuoteChecklist(quote) {
+  if (!quote?.estimate) return [];
+
+  const toolItems = (quote.estimate.toolsNeeded || []).map((item) => `Tool: ${item.item}`);
+  const materialItems = (quote.estimate.materials || []).map((item) => `Material: ${item.item}`);
+  return [...toolItems, ...materialItems];
+}
+
+function buildMapsUrl(address, currentLocation) {
+  const destination = encodeURIComponent(address || "");
+  if (!destination) return "";
+
+  if (currentLocation) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${currentLocation.lat},${currentLocation.lng}&destination=${destination}&travelmode=driving`;
+  }
+
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+}
+
+function formatDuration(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "";
+
+  const rounded = Math.round(minutes);
+  if (rounded < 60) return `${rounded} min`;
+
+  const hours = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
+}
+
+function formatMiles(meters) {
+  if (!Number.isFinite(meters) || meters <= 0) return "";
+  return `${(meters / 1609.34).toFixed(1)} mi`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function serializePhoto(file) {
+  if (!file) return null;
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const [, payload = ""] = dataUrl.split(",");
+
+  return {
+    data: payload,
+    mimeType: file.type || "image/jpeg",
+    fileName: file.name
+  };
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [appState, setAppState] = useState(loadState);
   const [selectedQuoteId, setSelectedQuoteId] = useState("");
-  const [checks, setChecks] = useState(checklistItems.map(() => false));
+  const [checkStates, setCheckStates] = useState({});
   const [quoteForm, setQuoteForm] = useState(blankQuoteForm);
   const [openAiKey, setOpenAiKey] = useState(loadApiKey);
   const [estimateResult, setEstimateResult] = useState(null);
@@ -267,10 +317,14 @@ export default function App() {
     actualHours: 2,
     completionNote: ""
   });
+  const [closeoutPhotos, setCloseoutPhotos] = useState({ before: null, after: null });
+  const [closeoutStatus, setCloseoutStatus] = useState({ saving: false, error: "", success: "" });
   const [activeClients, setActiveClients] = useState([]);
   const [allClients, setAllClients] = useState([]);
   const [clientSearch, setClientSearch] = useState("");
   const [clientStatus, setClientStatus] = useState({ loading: true, error: "" });
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [routeStatus, setRouteStatus] = useState({ loading: false, error: "", duration: "", distance: "" });
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(appState));
@@ -340,10 +394,13 @@ export default function App() {
 
   const activeQuote = appState.quotes[appState.quotes.length - 1] || null;
   const selectedSavedQuote = appState.quotes.find((quote) => quote.id === selectedQuoteId) || activeQuote;
+  const selectedPrepQuote = selectedSavedQuote || activeQuote;
   const latestCloseout = appState.closeouts[appState.closeouts.length - 1] || null;
   const openQuoteValue = appState.quotes.reduce((sum, quote) => sum + Number(getQuoteTotal(quote)), 0);
   const reachableClients = allClients.filter((client) => client.phone || client.email).length;
   const clientOptions = activeClients.length ? activeClients : allClients;
+  const prepChecklistItems = useMemo(() => getQuoteChecklist(selectedPrepQuote), [selectedPrepQuote]);
+  const mapsUrl = buildMapsUrl(selectedPrepQuote?.address, currentLocation);
   const stats = [
     ["Open Quotes", appState.quotes.length],
     ["Quoted Value", money(openQuoteValue)],
@@ -357,6 +414,78 @@ export default function App() {
   const dataQualityMessage = allClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
     : "";
+
+  useEffect(() => {
+    if (!prepChecklistItems.length) {
+      setCheckStates({});
+      return;
+    }
+
+    setCheckStates((current) => {
+      const next = {};
+      prepChecklistItems.forEach((item) => {
+        next[item] = current[item] || false;
+      });
+      return next;
+    });
+  }, [prepChecklistItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRoute() {
+      if (!currentLocation || !selectedPrepQuote?.address) {
+        if (!cancelled) {
+          setRouteStatus({ loading: false, error: "", duration: "", distance: "" });
+        }
+        return;
+      }
+
+      setRouteStatus({ loading: true, error: "", duration: "", distance: "" });
+
+      try {
+        const geocodeResponse = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(selectedPrepQuote.address)}`);
+        const geocodeData = await geocodeResponse.json();
+        const destination = geocodeData[0];
+
+        if (!destination) {
+          throw new Error("Could not find that job address on the map.");
+        }
+
+        const routeResponse = await fetch(`https://router.project-osrm.org/route/v1/driving/${currentLocation.lng},${currentLocation.lat};${destination.lon},${destination.lat}?overview=false`);
+        const routeData = await routeResponse.json();
+        const route = routeData.routes && routeData.routes[0];
+
+        if (!route) {
+          throw new Error("Could not calculate drive time for that address.");
+        }
+
+        if (!cancelled) {
+          setRouteStatus({
+            loading: false,
+            error: "",
+            duration: formatDuration(route.duration / 60),
+            distance: formatMiles(route.distance)
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setRouteStatus({
+            loading: false,
+            error: error.message || "Route unavailable right now.",
+            duration: "",
+            distance: ""
+          });
+        }
+      }
+    }
+
+    loadRoute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentLocation, selectedPrepQuote?.address]);
 
   const onQuoteField = ({ target: { name, value } }) => {
     setEstimateResult(null);
@@ -389,6 +518,36 @@ export default function App() {
 
   const onCloseoutField = ({ target: { name, value } }) => {
     setCloseoutForm((current) => ({ ...current, [name]: name === "invoiceTotal" || name === "actualHours" ? Number(value) : value }));
+  };
+
+  const onPhotoField = ({ target: { name, files } }) => {
+    setCloseoutStatus({ saving: false, error: "", success: "" });
+    setCloseoutPhotos((current) => ({
+      ...current,
+      [name]: files && files[0] ? files[0] : null
+    }));
+  };
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setRouteStatus({ loading: false, error: "Geolocation is not available in this browser.", duration: "", distance: "" });
+      return;
+    }
+
+    setRouteStatus({ loading: true, error: "", duration: "", distance: "" });
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCurrentLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+      },
+      () => {
+        setRouteStatus({ loading: false, error: "Current location was blocked or unavailable.", duration: "", distance: "" });
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const generateEstimate = async () => {
@@ -461,7 +620,7 @@ export default function App() {
     }
   };
 
-  const saveQuote = () => {
+  const saveQuote = async () => {
     if (!estimateResult) {
       setEstimateError("Generate an estimate before saving the quote.");
       return;
@@ -486,19 +645,85 @@ export default function App() {
       prep: estimateResult.toolsNeeded.map((tool) => tool.item).slice(0, 6),
       status: normalizeUrgency(quoteForm.urgency) === "emergency" ? "Emergency Quote Ready" : "Estimate Ready to Send"
     };
+
+    try {
+      await fetch(appsScriptUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "save_quote",
+          quoteId: savedQuote.id,
+          client: savedQuote.clientName,
+          city: savedQuote.city,
+          quote: {
+            jobTitle: savedQuote.service,
+            category: savedQuote.service,
+            estimatedHours: savedQuote.hours,
+            tripCount: 1,
+            grandTotal: savedQuote.total,
+            total: savedQuote.total,
+            scopeOfWork: savedQuote.estimate?.scopeOfWork || [savedQuote.scope],
+            materials: savedQuote.estimate?.materials || []
+          }
+        })
+      });
+    } catch {
+      // Keep the UI moving even if the sheet save hiccups.
+    }
+
     setAppState((current) => ({ ...current, quotes: [...current.quotes, savedQuote] }));
     setSelectedQuoteId(savedQuote.id);
     setQuoteForm(blankQuoteForm);
     setEstimateResult(null);
     setEstimateError("");
-    setChecks(checklistItems.map(() => false));
+    setCheckStates({});
     setActiveTab("prep");
   };
 
-  const saveCloseout = (event) => {
+  const saveCloseout = async (event) => {
     event.preventDefault();
     const quote = appState.quotes.find((item) => item.id === closeoutForm.quoteId);
     if (!quote) return;
+
+    setCloseoutStatus({ saving: true, error: "", success: "" });
+
+    try {
+      const beforePhoto = await serializePhoto(closeoutPhotos.before);
+      const afterPhoto = await serializePhoto(closeoutPhotos.after);
+
+      const response = await fetch(appsScriptUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "save_completion",
+          quoteId: quote.id,
+          clientName: quote.clientName,
+          timeCompleted: new Date().toLocaleString(),
+          actualHours: Number(closeoutForm.actualHours || getQuoteHours(quote)),
+          completionNotes: closeoutForm.completionNote || "Completed scope, verified operation, and cleaned up work area.",
+          invoiceAmount: Number(closeoutForm.invoiceTotal || getQuoteTotal(quote)),
+          beforePhoto,
+          afterPhoto
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok || result.success === false) {
+        throw new Error(result.error || "Closeout sync failed.");
+      }
+    } catch (error) {
+      setCloseoutStatus({
+        saving: false,
+        error: error.message || "Closeout sync failed.",
+        success: ""
+      });
+      return;
+    }
+
     const closeout = {
       quoteId: quote.id,
       clientName: quote.clientName,
@@ -512,6 +737,8 @@ export default function App() {
       closeouts: [...current.closeouts, closeout]
     }));
     setCloseoutForm({ quoteId: "", invoiceTotal: 0, actualHours: 2, completionNote: "" });
+    setCloseoutPhotos({ before: null, after: null });
+    setCloseoutStatus({ saving: false, error: "", success: "Closeout saved and photos sent to Drive." });
   };
 
   return (
@@ -572,10 +799,10 @@ export default function App() {
                 <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
                 <p className="field-note">Stored in this browser only for now. We can move this to a secure serverless setup before public launch.</p>
                 <label><span>Client list</span><select name="activeClient" value={quoteForm.activeClient} onChange={onClientPick}><option value="">Select client...</option>{clientOptions.map((client) => <option key={`${client.name}-${client.address}`} value={client.name}>{client.name}{client.city ? ` - ${client.city}` : ""}</option>)}</select></label>
-                <label><span>Customer name</span><input name="clientName" value={quoteForm.clientName} onChange={onQuoteField} placeholder="Sharon Levasseur" required /></label>
-                <label><span>Property address</span><input name="address" value={quoteForm.address} onChange={onQuoteField} placeholder="3830 Pine Cone Road, Melbourne FL" /></label>
+                <label><span>Customer name</span><input name="clientName" value={quoteForm.clientName} onChange={onQuoteField} placeholder="First Last" required /></label>
+                <label><span>Property address</span><input name="address" value={quoteForm.address} onChange={onQuoteField} placeholder="Address" /></label>
                 <div className="form-split">
-                  <label><span>Client city</span><input name="city" value={quoteForm.city} onChange={onQuoteField} placeholder="Melbourne" required /></label>
+                  <label><span>Client city</span><input name="city" value={quoteForm.city} onChange={onQuoteField} placeholder="City" required /></label>
                   <label><span>Urgency</span><select name="urgency" value={quoteForm.urgency} onChange={onQuoteField}><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></label>
                 </div>
                 <label><span>Service category</span><select name="service" value={quoteForm.service} onChange={onQuoteField}><option value="">Not specified</option>{serviceCatalog.map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}</select></label>
@@ -646,11 +873,11 @@ export default function App() {
           <div className="two-column">
             <article className="card">
               <div className="card-header"><div><p className="section-kicker">Mission Brief</p><h3>Load the truck with intent</h3></div></div>
-              {activeQuote ? <div className="prep-summary"><span>{activeQuote.id}</span><strong>{activeQuote.clientName}</strong><p>{activeQuote.service} at {activeQuote.address || activeQuote.city || "Brevard County property"}.</p><div className="prep-grid"><div><span>Trip Fee</span><strong>{money(getQuoteTripFee(activeQuote))}</strong></div><div><span>Estimated Hours</span><strong>{getQuoteHours(activeQuote)}</strong></div><div><span>Urgency</span><strong>{formatUrgencyLabel(activeQuote.urgency)}</strong></div></div><div className="mini-panel"><span>Truck Loadout</span><p>{getQuotePrep(activeQuote).join(", ") || "Generate an estimate to build the loadout."}</p></div>{activeQuote.estimate?.smartAddOns?.length ? <div className="mini-panel"><span>Smart Add-Ons</span><p>{activeQuote.estimate.smartAddOns.join(" | ")}</p></div> : null}</div> : <div className="empty-state">Save a quote first to generate the mission brief.</div>}
+              {selectedPrepQuote ? <div className="prep-summary"><span>{selectedPrepQuote.id}</span><strong>{selectedPrepQuote.clientName}</strong><p>{selectedPrepQuote.service} at {selectedPrepQuote.address || selectedPrepQuote.city || "Brevard County property"}.</p><div className="prep-grid"><div><span>Trip Fee</span><strong>{money(getQuoteTripFee(selectedPrepQuote))}</strong></div><div><span>Estimated Hours</span><strong>{getQuoteHours(selectedPrepQuote)}</strong></div><div><span>Urgency</span><strong>{formatUrgencyLabel(selectedPrepQuote.urgency)}</strong></div></div><div className="mini-panel"><span>Truck Loadout</span><p>{getQuotePrep(selectedPrepQuote).join(", ") || "Generate an estimate to build the loadout."}</p></div><div className="mini-panel"><span>Drive Route</span><p>{routeStatus.loading ? "Checking route from your current location..." : routeStatus.duration ? `${routeStatus.duration}${routeStatus.distance ? ` - ${routeStatus.distance}` : ""}` : routeStatus.error || "Use your current location to map this job."}</p><div className="client-actions">{selectedPrepQuote.address ? <a className="mini-action" href={mapsUrl || buildMapsUrl(selectedPrepQuote.address)} target="_blank" rel="noreferrer">Google Maps</a> : null}<button className="mini-action mini-action-button" type="button" onClick={useCurrentLocation}>Use Current Location</button></div></div>{selectedPrepQuote.estimate?.smartAddOns?.length ? <div className="mini-panel"><span>Smart Add-Ons</span><p>{selectedPrepQuote.estimate.smartAddOns.join(" | ")}</p></div> : null}</div> : <div className="empty-state">Save a quote first to generate the mission brief.</div>}
             </article>
             <article className="card">
-              <div className="card-header"><div><p className="section-kicker">Departure Checklist</p><h3>No forgotten gear</h3></div></div>
-              <div className="checklist">{checklistItems.map((item, index) => <label className={`check-item ${checks[index] ? "is-done" : ""}`} key={item}><input type="checkbox" checked={checks[index]} onChange={() => setChecks((current) => current.map((value, currentIndex) => currentIndex === index ? !value : value))} /><span>{item}</span></label>)}</div>
+              <div className="card-header"><div><p className="section-kicker">Departure Checklist</p><h3>Tools and materials to load</h3></div></div>
+              <div className="checklist">{prepChecklistItems.length ? prepChecklistItems.map((item) => <label className={`check-item ${checkStates[item] ? "is-done" : ""}`} key={item}><input type="checkbox" checked={Boolean(checkStates[item])} onChange={() => setCheckStates((current) => ({ ...current, [item]: !current[item] }))} /><span>{item}</span></label>) : <div className="empty-state">Generate or select a quote to build the loadout checklist.</div>}</div>
             </article>
           </div>
         </section>}
@@ -666,7 +893,14 @@ export default function App() {
                   <label><span>Actual hours</span><input name="actualHours" type="number" min="0" step="0.5" value={closeoutForm.actualHours} onChange={onCloseoutField} /></label>
                 </div>
                 <label><span>Completion note</span><textarea name="completionNote" rows="5" value={closeoutForm.completionNote} onChange={onCloseoutField} placeholder="Completed repair, tested operation, cleaned work area, and reviewed result with customer." /></label>
-                <button className="primary-button" type="submit" disabled={!appState.quotes.length}>Save Closeout</button>
+                <div className="form-split">
+                  <label><span>Before photo</span><input name="before" type="file" accept="image/*" onChange={onPhotoField} /></label>
+                  <label><span>After photo</span><input name="after" type="file" accept="image/*" onChange={onPhotoField} /></label>
+                </div>
+                {closeoutStatus.error ? <div className="status-note is-error">{closeoutStatus.error}</div> : null}
+                {closeoutStatus.success ? <div className="field-note">{closeoutStatus.success}</div> : null}
+                <p className="field-note">Photos are sent to Apps Script during closeout. To save them under `My Drive/1. Clients/Client Name/Job Photos`, the Apps Script upload handler needs that folder-path update.</p>
+                <button className="primary-button" type="submit" disabled={!appState.quotes.length || closeoutStatus.saving}>{closeoutStatus.saving ? "Saving..." : "Save Closeout"}</button>
               </form>
             </article>
             <article className="card accent-card">
