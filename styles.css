@@ -54,7 +54,7 @@ body::before {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 1.25rem;
   padding: 0.9rem 1.5rem;
@@ -157,37 +157,6 @@ body::before {
   color: var(--gold);
   background: rgba(255, 196, 23, 0.08);
   box-shadow: inset 0 0 0 1px rgba(255, 196, 23, 0.16);
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.header-cta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.85rem 1.1rem;
-  border-radius: 12px;
-  text-decoration: none;
-  font-family: "Barlow Condensed", sans-serif;
-  font-size: 0.9rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.header-cta.primary {
-  background: linear-gradient(135deg, var(--gold), #ffdf7a);
-  color: #161109;
-}
-
-.header-cta.ghost {
-  border: 1px solid rgba(255, 196, 23, 0.34);
-  color: var(--text);
-  background: transparent;
 }
 
 .workspace {
@@ -433,6 +402,28 @@ body::before {
 .quick-link strong {
   display: block;
   margin: 0.3rem 0;
+}
+
+.saved-item-button {
+  width: 100%;
+  border: 1px solid rgba(255, 196, 23, 0.1);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.saved-item-button:hover,
+.saved-item-button:focus-visible {
+  border-color: rgba(255, 196, 23, 0.24);
+  background: rgba(255, 196, 23, 0.04);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.saved-item-button.is-selected {
+  border-color: rgba(255, 196, 23, 0.32);
+  background: rgba(255, 196, 23, 0.07);
 }
 
 .mini-panel {
@@ -752,8 +743,7 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .topbar-nav,
-  .topbar-actions {
+  .topbar-nav {
     justify-content: flex-start;
   }
 }
@@ -784,12 +774,6 @@ textarea {
     min-width: 100%;
     width: 100%;
     align-self: stretch;
-  }
-
-  .topbar-actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
   }
 
   .service-zones,

@@ -254,6 +254,7 @@ function getQuoteTripFee(quote) {
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [appState, setAppState] = useState(loadState);
+  const [selectedQuoteId, setSelectedQuoteId] = useState("");
   const [checks, setChecks] = useState(checklistItems.map(() => false));
   const [quoteForm, setQuoteForm] = useState(blankQuoteForm);
   const [openAiKey, setOpenAiKey] = useState(loadApiKey);
@@ -339,14 +340,27 @@ export default function App() {
     }
   }, [appState.quotes, closeoutForm.quoteId]);
 
+  useEffect(() => {
+    if (!appState.quotes.length) {
+      setSelectedQuoteId("");
+      return;
+    }
+
+    if (!selectedQuoteId || !appState.quotes.some((quote) => quote.id === selectedQuoteId)) {
+      setSelectedQuoteId(appState.quotes[appState.quotes.length - 1].id);
+    }
+  }, [appState.quotes, selectedQuoteId]);
+
   const activeQuote = appState.quotes[appState.quotes.length - 1] || null;
+  const selectedSavedQuote = appState.quotes.find((quote) => quote.id === selectedQuoteId) || activeQuote;
   const latestCloseout = appState.closeouts[appState.closeouts.length - 1] || null;
   const openQuoteValue = appState.quotes.reduce((sum, quote) => sum + Number(getQuoteTotal(quote)), 0);
   const reachableClients = allClients.filter((client) => client.phone || client.email).length;
+  const clientOptions = activeClients.length ? activeClients : allClients;
   const stats = [
     ["Open Quotes", appState.quotes.length],
     ["Quoted Value", money(openQuoteValue)],
-    ["Active Clients", activeClients.length],
+    ["Quote Clients", clientOptions.length],
     ["Reachable Contacts", reachableClients]
   ];
   const filteredClients = useMemo(() => allClients.filter((client) => {
@@ -368,7 +382,7 @@ export default function App() {
   };
 
   const onClientPick = ({ target: { value } }) => {
-    const selectedClient = activeClients.find((client) => client.name === value);
+    const selectedClient = clientOptions.find((client) => client.name === value);
     setEstimateResult(null);
     setEstimateError("");
 
@@ -486,6 +500,7 @@ export default function App() {
       status: normalizeUrgency(quoteForm.urgency) === "emergency" ? "Emergency Quote Ready" : "Estimate Ready to Send"
     };
     setAppState((current) => ({ ...current, quotes: [...current.quotes, savedQuote] }));
+    setSelectedQuoteId(savedQuote.id);
     setQuoteForm(blankQuoteForm);
     setEstimateResult(null);
     setEstimateError("");
@@ -534,10 +549,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="topbar-actions">
-          <a className="header-cta primary" href="https://321honeydone.com" target="_blank" rel="noreferrer">Request Estimate</a>
-          <a className="header-cta ghost" href="tel:3213238047">Text Photos</a>
-        </div>
       </header>
 
       <main className="workspace website-layout">
@@ -573,7 +584,7 @@ export default function App() {
               <div className="form-stack">
                 <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
                 <p className="field-note">Stored in this browser only for now. We can move this to a secure serverless setup before public launch.</p>
-                <label><span>Active client list</span><select name="activeClient" value={quoteForm.activeClient} onChange={onClientPick}><option value="">Select active client...</option>{activeClients.map((client) => <option key={`${client.name}-${client.address}`} value={client.name}>{client.name}{client.city ? ` - ${client.city}` : ""}</option>)}</select></label>
+                <label><span>Client list</span><select name="activeClient" value={quoteForm.activeClient} onChange={onClientPick}><option value="">Select client...</option>{clientOptions.map((client) => <option key={`${client.name}-${client.address}`} value={client.name}>{client.name}{client.city ? ` - ${client.city}` : ""}</option>)}</select></label>
                 <label><span>Customer name</span><input name="clientName" value={quoteForm.clientName} onChange={onQuoteField} placeholder="Sharon Levasseur" required /></label>
                 <label><span>Property address</span><input name="address" value={quoteForm.address} onChange={onQuoteField} placeholder="3830 Pine Cone Road, Melbourne FL" /></label>
                 <div className="form-split">
@@ -622,7 +633,25 @@ export default function App() {
           </div>
           <article className="card">
             <div className="card-header"><div><p className="section-kicker">Saved Quotes</p><h3>Recent field-ready estimates</h3></div></div>
-            <div className="saved-list">{appState.quotes.length ? appState.quotes.slice().reverse().map((quote) => <article className="saved-item" key={quote.id}><span>{quote.id}</span><strong>{quote.clientName} - {quote.service}</strong><p>{quote.address || "Address not set"}</p><p>{money(getQuoteTotal(quote))} - {quote.status}</p></article>) : <div className="empty-state">No saved quotes yet.</div>}</div>
+            <div className="saved-list">{appState.quotes.length ? appState.quotes.slice().reverse().map((quote) => <button className={`saved-item saved-item-button ${selectedSavedQuote?.id === quote.id ? "is-selected" : ""}`} type="button" key={quote.id} onClick={() => setSelectedQuoteId(quote.id)}><span>{quote.id}</span><strong>{quote.clientName} - {quote.service}</strong><p>{quote.address || "Address not set"}</p><p>{money(getQuoteTotal(quote))} - {quote.status}</p></button>) : <div className="empty-state">No saved quotes yet.</div>}</div>
+          </article>
+          <article className="card accent-card">
+            <div className="card-header"><div><p className="section-kicker">Selected Quote</p><h3>Open saved estimate</h3></div></div>
+            {selectedSavedQuote ? <div className="quote-preview estimate-report">
+              <span>{selectedSavedQuote.id}</span>
+              <strong>{selectedSavedQuote.clientName}</strong>
+              <p>{selectedSavedQuote.scope || selectedSavedQuote.estimate?.jobOverview || "No scope saved."}</p>
+              <div className="preview-total">{money(getQuoteTotal(selectedSavedQuote))}</div>
+              <div className="quote-breakdown">
+                <div><span>Labor</span><strong>{money(selectedSavedQuote.labor || selectedSavedQuote.estimate?.pricingBuild?.laborAmount)}</strong></div>
+                <div><span>Trip Fee</span><strong>{money(getQuoteTripFee(selectedSavedQuote))}</strong></div>
+                <div><span>Materials Base</span><strong>{money(selectedSavedQuote.materials || selectedSavedQuote.estimate?.pricingBuild?.materialsBase)}</strong></div>
+                <div><span>Contingency</span><strong>{money(selectedSavedQuote.contingency || selectedSavedQuote.estimate?.pricingBuild?.contingencyAmount)}</strong></div>
+              </div>
+              {selectedSavedQuote.estimate?.scopeOfWork?.length ? <div className="estimate-section"><h4>Scope of Work</h4><ul className="estimate-list">{selectedSavedQuote.estimate.scopeOfWork.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+              {selectedSavedQuote.estimate?.toolsNeeded?.length ? <div className="estimate-section"><h4>Tools Needed</h4><ul className="estimate-list">{selectedSavedQuote.estimate.toolsNeeded.map((item) => <li key={item.item}>{item.item}: {item.reason}</li>)}</ul></div> : <div className="mini-panel"><span>Loadout</span><p>{getQuotePrep(selectedSavedQuote).join(", ") || "No loadout saved yet."}</p></div>}
+              {selectedSavedQuote.estimate?.permitNote ? <div className="estimate-section"><h4>Permit Note</h4><p>{selectedSavedQuote.estimate.permitNote}</p></div> : null}
+            </div> : <div className="empty-state">Click a saved quote to display it here.</div>}
           </article>
         </section>}
 
