@@ -1,5 +1,5 @@
 export const storageKey = "honeydone-command-center-v4";
-export const appsScriptUrl = "https://script.google.com/macros/s/AKfycbz9zZdaBSSKpr90iv_eP6h7mvdNpG2GPzmgvQEmdC6TSTRKt7k0iTQPE2kKvvqyblNv/exec";
+export const appsScriptUrl = "https://script.google.com/macros/s/AKfycby5SjbEGllTubUmgnB93vej7W4ZMQKDkvgJNbfTNm57PNjlT3xnr9G9Dt5mdcANInlz/exec";
 
 export const serviceCatalog = [
   { name: "General Repairs", base: 145, trip: 65, prep: ["Fastener kit", "Driver set", "Touch-up supplies"] },

@@ -270,7 +270,7 @@ export default function App() {
   const [activeClients, setActiveClients] = useState([]);
   const [allClients, setAllClients] = useState([]);
   const [clientSearch, setClientSearch] = useState("");
-  const [clientStatus, setClientStatus] = useState({ loading: true, error: "", warning: "" });
+  const [clientStatus, setClientStatus] = useState({ loading: true, error: "" });
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(appState));
@@ -284,39 +284,26 @@ export default function App() {
     let cancelled = false;
 
     async function loadClients() {
-      setClientStatus({ loading: true, error: "", warning: "" });
+      setClientStatus({ loading: true, error: "" });
 
       try {
-        const [activeResponse, allResponse] = await Promise.all([
-          fetch(`${appsScriptUrl}?action=get_active_clients`),
-          fetch(`${appsScriptUrl}?action=get_all_clients`)
-        ]);
+        const response = await fetch(`${appsScriptUrl}?action=get_all_clients`);
+        const data = await response.json();
 
-        const [activeData, allData] = await Promise.all([
-          activeResponse.json(),
-          allResponse.json()
-        ]);
-
-        if (!allResponse.ok || allData.success === false) {
-          throw new Error(allData.error || "Full client list failed to load.");
+        if (!response.ok || data.success === false) {
+          throw new Error(data.error || "Client list failed to load.");
         }
 
-        const fullClients = allData.clients || [];
-        const activeClientRecords = activeResponse.ok && activeData.success !== false
-          ? (activeData.clients || [])
-          : fullClients;
-        const warning = activeResponse.ok && activeData.success !== false
-          ? ""
-          : "Active client feed is unavailable right now, so the app is using the full client list for the quote dropdown.";
+        const clients = data.clients || [];
 
         if (!cancelled) {
-          setActiveClients(activeClientRecords);
-          setAllClients(fullClients);
-          setClientStatus({ loading: false, error: "", warning });
+          setActiveClients(clients);
+          setAllClients(clients);
+          setClientStatus({ loading: false, error: "" });
         }
       } catch (error) {
         if (!cancelled) {
-          setClientStatus({ loading: false, error: error.message || "Client sync failed.", warning: "" });
+          setClientStatus({ loading: false, error: error.message || "Client sync failed." });
         }
       }
     }
@@ -367,9 +354,9 @@ export default function App() {
     const haystack = [client.name, client.city, client.phone, client.email, client.address].join(" ").toLowerCase();
     return haystack.includes(clientSearch.toLowerCase());
   }), [allClients, clientSearch]);
-  const dataQualityMessage = clientStatus.warning || (allClients.length && !reachableClients
+  const dataQualityMessage = allClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
-    : "");
+    : "";
 
   const onQuoteField = ({ target: { name, value } }) => {
     setEstimateResult(null);
@@ -702,7 +689,6 @@ export default function App() {
               </div>
               {clientStatus.loading ? <div className="empty-state">Loading client lists...</div> : null}
               {clientStatus.error ? <div className="empty-state">{clientStatus.error}</div> : null}
-              {clientStatus.warning ? <div className="empty-state">{clientStatus.warning}</div> : null}
               {!clientStatus.loading && !clientStatus.error ? <div className="client-directory">
                 {filteredClients.length ? filteredClients.map((client) => <article className="client-row" key={`${client.name}-${client.address}`}>
                   <div className="client-main">
