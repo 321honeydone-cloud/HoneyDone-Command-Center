@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { appsScriptUrl, defaultState, quickLinks, serviceCatalog, serviceZones, storageKey } from "./data";
+import { appsScriptUrl, defaultState, jobberApiBase, quickLinks, serviceCatalog, serviceZones, storageKey } from "./data";
 import logoImage from "./assets/logo-shirt-front.png";
 
 const tabs = ["overview", "quotes", "prep", "closeout", "contacts"];
@@ -338,7 +338,8 @@ export default function App() {
   const [activeClients, setActiveClients] = useState([]);
   const [allClients, setAllClients] = useState([]);
   const [clientSearch, setClientSearch] = useState("");
-  const [clientStatus, setClientStatus] = useState({ loading: true, error: "" });
+  const [clientStatus, setClientStatus] = useState({ loading: true, error: "", source: "Loading...", fallback: "" });
+  const [jobberStatus, setJobberStatus] = useState({ loading: true, configured: false, connected: false, accountName: "", error: "" });
   const [currentLocation, setCurrentLocation] = useState(null);
   const [locationRequested, setLocationRequested] = useState(false);
   const [routeStatus, setRouteStatus] = useState({ loading: false, error: "", duration: "", distance: "" });
@@ -354,27 +355,92 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadAppsScriptClients() {
+      const response = await fetch(`${appsScriptUrl}?action=get_all_clients`);
+      const data = await response.json();
+
+      if (!response.ok || data.success === false) {
+        throw new Error(data.error || "Client list failed to load.");
+      }
+
+      return data.clients || [];
+    }
+
     async function loadClients() {
-      setClientStatus({ loading: true, error: "" });
+      setClientStatus({ loading: true, error: "", source: "Loading...", fallback: "" });
+      setJobberStatus((current) => ({ ...current, loading: true, error: "" }));
 
       try {
-        const response = await fetch(`${appsScriptUrl}?action=get_all_clients`);
-        const data = await response.json();
+        let loadedClients = [];
+        let source = "Apps Script";
+        let fallback = "";
 
-        if (!response.ok || data.success === false) {
-          throw new Error(data.error || "Client list failed to load.");
+        try {
+          const statusResponse = await fetch(`${jobberApiBase}/status`);
+          const statusData = await statusResponse.json();
+
+          if (!statusResponse.ok) {
+            throw new Error(statusData.error || "Jobber status unavailable.");
+          }
+
+          if (!cancelled) {
+            setJobberStatus({
+              loading: false,
+              configured: Boolean(statusData.configured),
+              connected: Boolean(statusData.connected),
+              accountName: statusData.accountName || "",
+              error: ""
+            });
+          }
+
+          if (statusData.configured && statusData.connected) {
+            const clientResponse = await fetch(`${jobberApiBase}/clients`);
+            const clientData = await clientResponse.json();
+
+            if (!clientResponse.ok || clientData.success === false) {
+              throw new Error(clientData.error || "Jobber client sync failed.");
+            }
+
+            loadedClients = clientData.clients || [];
+            source = "Jobber";
+            fallback = clientData.fallbackReason ? `Address fallback used: ${clientData.fallbackReason}` : "";
+          } else {
+            loadedClients = await loadAppsScriptClients();
+            source = "Apps Script";
+            fallback = statusData.configured
+              ? "Jobber is configured but not connected yet. Using Apps Script until you connect it."
+              : "Jobber is not configured yet. Using Apps Script for now.";
+          }
+        } catch (jobberError) {
+          loadedClients = await loadAppsScriptClients();
+          source = "Apps Script";
+          fallback = jobberError.message || "Jobber is unavailable, so Apps Script is being used.";
+
+          if (!cancelled) {
+            setJobberStatus({
+              loading: false,
+              configured: false,
+              connected: false,
+              accountName: "",
+              error: fallback
+            });
+          }
         }
 
-        const clients = data.clients || [];
-
         if (!cancelled) {
-          setActiveClients(clients);
-          setAllClients(clients);
-          setClientStatus({ loading: false, error: "" });
+          setActiveClients(loadedClients);
+          setAllClients(loadedClients);
+          setClientStatus({ loading: false, error: "", source, fallback });
         }
       } catch (error) {
         if (!cancelled) {
-          setClientStatus({ loading: false, error: error.message || "Client sync failed." });
+          setClientStatus({
+            loading: false,
+            error: error.message || "Client sync failed.",
+            source: "Unavailable",
+            fallback: ""
+          });
+          setJobberStatus((current) => ({ ...current, loading: false, error: current.error || error.message || "Client sync failed." }));
         }
       }
     }
@@ -431,6 +497,12 @@ export default function App() {
   }), [allClients, clientSearch]);
   const dataQualityMessage = allClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
+    : "";
+  const jobberNotice = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("jobber")
+    : "";
+  const jobberDetail = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("jobber_detail")
     : "";
 
   useEffect(() => {
@@ -880,6 +952,7 @@ export default function App() {
                 <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
                 <p className="field-note">Stored in this browser only for now. We can move this to a secure serverless setup before public launch.</p>
                 <label><span>Client list</span><select name="activeClient" value={quoteForm.activeClient} onChange={onClientPick}><option value="">Select client...</option>{clientOptions.map((client) => <option key={`${client.name}-${client.address}`} value={client.name}>{client.name}{client.city ? ` - ${client.city}` : ""}</option>)}</select></label>
+                <p className="field-note">Client source: {clientStatus.source}{clientStatus.fallback ? ` - ${clientStatus.fallback}` : ""}</p>
                 <label><span>Customer name</span><input name="clientName" value={quoteForm.clientName} onChange={onQuoteField} placeholder="First Last" required /></label>
                 <label><span>Property address</span><input name="address" value={quoteForm.address} onChange={onQuoteField} placeholder="Address" /></label>
                 <div className="form-split">
@@ -1032,9 +1105,18 @@ export default function App() {
             <article className="card">
               <div className="card-header"><div><p className="section-kicker">Sync Status</p><h3>Client feeds and company shortcuts</h3></div></div>
               <div className="brand-guidelines">
-                <p>Active client feed: {activeClients.length} records loaded.</p>
-                <p>Full client feed: {allClients.length} records loaded.</p>
+                <p>Client source: {clientStatus.source}</p>
+                <p>Loaded records: {allClients.length}</p>
+                <p>Jobber status: {jobberStatus.loading ? "Checking..." : jobberStatus.connected ? `Connected${jobberStatus.accountName ? ` to ${jobberStatus.accountName}` : ""}` : jobberStatus.configured ? "Configured but not connected" : "Not configured locally yet"}</p>
+                {jobberNotice === "connected" ? <p>Jobber connected successfully.</p> : null}
+                {jobberNotice === "missing_config" ? <p>{jobberDetail || "Add Jobber credentials to .env, then restart the local server."}</p> : null}
+                {jobberNotice === "error" ? <p>{jobberDetail || "Jobber connection failed."}</p> : null}
+                {clientStatus.fallback ? <p>{clientStatus.fallback}</p> : null}
+                {jobberStatus.error ? <p>{jobberStatus.error}</p> : null}
                 {dataQualityMessage ? <p>{dataQualityMessage}</p> : <p>Phone and email data are available for {reachableClients} client records.</p>}
+              </div>
+              <div className="client-actions">
+                <a className="mini-action" href={`${jobberApiBase}/connect`}>Connect Jobber</a>
               </div>
               <div className="quick-links">{quickLinks.map((item) => <a className="quick-link" href={item.href} key={item.label} target={item.href.startsWith("http") ? "_blank" : undefined} rel={item.href.startsWith("http") ? "noreferrer" : undefined}><div><span>{item.meta}</span><strong>{item.label}</strong></div><em>Open</em></a>)}</div>
             </article>
