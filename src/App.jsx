@@ -5,6 +5,7 @@ import logoImage from "./assets/logo-shirt-front.png";
 const tabs = ["overview", "quotes", "prep", "closeout", "contacts"];
 const apiKeyStorageKey = "honeydone-openai-api-key";
 const estimatorModel = "gpt-4o-mini";
+const maxEstimatorImages = 4;
 const blankQuoteForm = {
   activeClient: "",
   clientName: "",
@@ -301,12 +302,21 @@ async function serializePhoto(file) {
   };
 }
 
+function summarizeMedia(files) {
+  return files.map((file) => ({
+    name: file.name,
+    type: file.type,
+    size: file.size
+  }));
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [appState, setAppState] = useState(loadState);
   const [selectedQuoteId, setSelectedQuoteId] = useState("");
   const [checkStates, setCheckStates] = useState({});
   const [quoteForm, setQuoteForm] = useState(blankQuoteForm);
+  const [quoteMedia, setQuoteMedia] = useState([]);
   const [openAiKey, setOpenAiKey] = useState(loadApiKey);
   const [estimateResult, setEstimateResult] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
@@ -497,6 +507,20 @@ export default function App() {
     }));
   };
 
+  const onQuoteMediaField = ({ target: { files } }) => {
+    if (!files || !files.length) return;
+
+    setEstimateResult(null);
+    setEstimateError("");
+    setQuoteMedia((current) => [...current, ...Array.from(files)]);
+  };
+
+  const removeQuoteMedia = (index) => {
+    setEstimateResult(null);
+    setEstimateError("");
+    setQuoteMedia((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  };
+
   const onClientPick = ({ target: { value } }) => {
     const selectedClient = clientOptions.find((client) => client.name === value);
     setEstimateResult(null);
@@ -550,6 +574,29 @@ export default function App() {
     );
   };
 
+  const openQuoteForCloseout = (quote) => {
+    if (!quote) return;
+
+    setCloseoutForm({
+      quoteId: quote.id,
+      invoiceTotal: Number(getQuoteTotal(quote)),
+      actualHours: Number(getQuoteHours(quote)),
+      completionNote: ""
+    });
+    setCloseoutStatus({ saving: false, error: "", success: "" });
+    setActiveTab("closeout");
+  };
+
+  const deleteQuote = (quoteId) => {
+    setAppState((current) => ({
+      ...current,
+      quotes: current.quotes.filter((quote) => quote.id !== quoteId)
+    }));
+    if (selectedQuoteId === quoteId) {
+      setSelectedQuoteId("");
+    }
+  };
+
   const generateEstimate = async () => {
     if (!openAiKey.trim()) {
       setEstimateError("Add your OpenAI API key first. It stays in this browser only for now.");
@@ -570,6 +617,13 @@ export default function App() {
     setEstimateError("");
 
     try {
+      const imageFiles = quoteMedia.filter((file) => file.type.startsWith("image/")).slice(0, maxEstimatorImages);
+      const imageInputs = await Promise.all(imageFiles.map(async (file) => ({
+        type: "input_image",
+        image_url: await readFileAsDataUrl(file)
+      })));
+      const videoCount = quoteMedia.filter((file) => file.type.startsWith("video/")).length;
+
       const response = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
@@ -582,11 +636,18 @@ export default function App() {
             { role: "system", content: estimatorSystemPrompt },
             {
               role: "user",
-              content: buildEstimatePrompt({
-                ...quoteForm,
-                city: quoteForm.city || extractCity(quoteForm.address),
-                urgency: normalizeUrgency(quoteForm.urgency)
-              })
+              content: [
+                {
+                  type: "input_text",
+                  text: buildEstimatePrompt({
+                    ...quoteForm,
+                    city: quoteForm.city || extractCity(quoteForm.address),
+                    urgency: normalizeUrgency(quoteForm.urgency),
+                    scope: `${quoteForm.scope}${videoCount ? `\n\nAttached reference videos: ${videoCount}. Videos are for planner reference and may need manual review.` : ""}`
+                  })
+                },
+                ...imageInputs
+              ]
             }
           ],
           text: {
@@ -643,6 +704,7 @@ export default function App() {
       materials: pricing.materialsBase,
       contingency: pricing.contingencyAmount,
       prep: estimateResult.toolsNeeded.map((tool) => tool.item).slice(0, 6),
+      media: summarizeMedia(quoteMedia),
       status: normalizeUrgency(quoteForm.urgency) === "emergency" ? "Emergency Quote Ready" : "Estimate Ready to Send"
     };
 
@@ -676,6 +738,7 @@ export default function App() {
     setAppState((current) => ({ ...current, quotes: [...current.quotes, savedQuote] }));
     setSelectedQuoteId(savedQuote.id);
     setQuoteForm(blankQuoteForm);
+    setQuoteMedia([]);
     setEstimateResult(null);
     setEstimateError("");
     setCheckStates({});
@@ -807,6 +870,15 @@ export default function App() {
                 </div>
                 <label><span>Service category</span><select name="service" value={quoteForm.service} onChange={onQuoteField}><option value="">Not specified</option>{serviceCatalog.map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}</select></label>
                 <label><span>Scope notes</span><textarea name="scope" rows="6" value={quoteForm.scope} onChange={onQuoteField} placeholder="Explain the full job, access issues, damage, customer expectations, and anything that feels uncertain." required /></label>
+                <div className="media-stack">
+                  <label><span>Upload photos or videos</span><input type="file" accept="image/*,video/*" multiple onChange={onQuoteMediaField} /></label>
+                  <div className="form-split">
+                    <label><span>Take photo</span><input type="file" accept="image/*" capture="environment" onChange={onQuoteMediaField} /></label>
+                    <label><span>Take video</span><input type="file" accept="video/*" capture="environment" onChange={onQuoteMediaField} /></label>
+                  </div>
+                  <p className="field-note">Images are included in AI estimate analysis. Videos are attached to the quote for reference; keep them around one minute for easier field review.</p>
+                  {quoteMedia.length ? <div className="media-list">{quoteMedia.map((file, index) => <div className="media-item" key={`${file.name}-${index}`}><div><strong>{file.name}</strong><p>{file.type.startsWith("video/") ? "Video reference" : "Image reference"} - {(file.size / 1024 / 1024).toFixed(1)} MB</p></div><button className="mini-action mini-action-button" type="button" onClick={() => removeQuoteMedia(index)}>Remove</button></div>)}</div> : null}
+                </div>
                 {estimateError ? <div className="status-note is-error">{estimateError}</div> : null}
                 <div className="form-actions">
                   <button className="primary-button" type="button" onClick={generateEstimate} disabled={estimateLoading}>{estimateLoading ? "Generating..." : "Generate Estimate"}</button>
@@ -850,7 +922,7 @@ export default function App() {
             <div className="saved-list">{appState.quotes.length ? appState.quotes.slice().reverse().map((quote) => <button className={`saved-item saved-item-button ${selectedSavedQuote?.id === quote.id ? "is-selected" : ""}`} type="button" key={quote.id} onClick={() => setSelectedQuoteId(quote.id)}><span>{quote.id}</span><strong>{quote.clientName} - {quote.service}</strong><p>{quote.address || "Address not set"}</p><p>{money(getQuoteTotal(quote))} - {quote.status}</p></button>) : <div className="empty-state">No saved quotes yet.</div>}</div>
           </article>
           <article className="card accent-card">
-            <div className="card-header"><div><p className="section-kicker">Selected Quote</p><h3>Open saved estimate</h3></div></div>
+            <div className="card-header"><div><p className="section-kicker">Selected Quote</p><h3>Open saved estimate</h3></div>{selectedSavedQuote ? <div className="quote-actions"><button className="icon-action" type="button" onClick={() => openQuoteForCloseout(selectedSavedQuote)} aria-label="Mark quote complete"><span aria-hidden="true">✓</span></button><button className="icon-action is-danger" type="button" onClick={() => deleteQuote(selectedSavedQuote.id)} aria-label="Delete quote"><span aria-hidden="true">X</span></button></div> : null}</div>
             {selectedSavedQuote ? <div className="quote-preview estimate-report">
               <span>{selectedSavedQuote.id}</span>
               <strong>{selectedSavedQuote.clientName}</strong>
@@ -863,6 +935,7 @@ export default function App() {
                 <div><span>Contingency</span><strong>{money(selectedSavedQuote.contingency || selectedSavedQuote.estimate?.pricingBuild?.contingencyAmount)}</strong></div>
               </div>
               {selectedSavedQuote.estimate?.scopeOfWork?.length ? <div className="estimate-section"><h4>Scope of Work</h4><ul className="estimate-list">{selectedSavedQuote.estimate.scopeOfWork.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+              {selectedSavedQuote.media?.length ? <div className="estimate-section"><h4>Attached Media</h4><ul className="estimate-list">{selectedSavedQuote.media.map((item) => <li key={`${item.name}-${item.size}`}>{item.name} - {item.type.startsWith("video/") ? "Video" : "Image"}</li>)}</ul></div> : null}
               {selectedSavedQuote.estimate?.toolsNeeded?.length ? <div className="estimate-section"><h4>Tools Needed</h4><ul className="estimate-list">{selectedSavedQuote.estimate.toolsNeeded.map((item) => <li key={item.item}>{item.item}: {item.reason}</li>)}</ul></div> : <div className="mini-panel"><span>Loadout</span><p>{getQuotePrep(selectedSavedQuote).join(", ") || "No loadout saved yet."}</p></div>}
               {selectedSavedQuote.estimate?.permitNote ? <div className="estimate-section"><h4>Permit Note</h4><p>{selectedSavedQuote.estimate.permitNote}</p></div> : null}
             </div> : <div className="empty-state">Click a saved quote to display it here.</div>}
