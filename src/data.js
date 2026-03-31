@@ -1,4 +1,4 @@
-export const storageKey = "honeydone-command-center-v3";
+export const storageKey = "honeydone-command-center-v4";
 export const appsScriptUrl = "https://script.google.com/macros/s/AKfycbyYILvYLvSYwNVMyr1YNj1C6O5OKYUAYZqSJfRBy9MeVHbCeFgICMblIX0_bTrOabFK/exec";
 
 export const serviceCatalog = [
@@ -31,39 +31,6 @@ export const quickLinks = [
 ];
 
 export const defaultState = {
-  quotes: [
-    {
-      id: "HD-24031",
-      clientName: "Sharon Levasseur",
-      address: "3830 Pine Cone Road, Melbourne FL",
-      service: "Doors & Hardware",
-      urgency: "standard",
-      hours: 2,
-      materials: 85,
-      scope: "Reset front entry hardware, tighten strike alignment, and verify latch operation.",
-      total: 488,
-      labor: 329,
-      tripFee: 65,
-      contingency: 9,
-      prep: ["Hinge assortment", "Driver set", "Shims"],
-      status: "Needs Scheduling"
-    },
-    {
-      id: "HD-24032",
-      clientName: "Monique Rivera",
-      address: "256 Peckham St NE, Palm Bay FL",
-      service: "Windows & Screens",
-      urgency: "priority",
-      hours: 3,
-      materials: 120,
-      scope: "Replace torn patio screen and inspect frame tension on adjacent panel.",
-      total: 655,
-      labor: 443,
-      tripFee: 80,
-      contingency: 12,
-      prep: ["Spline", "Roller tool", "Screen material"],
-      status: "Awaiting Approval"
-    }
-  ],
+  quotes: [],
   closeouts: []
 };

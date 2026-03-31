@@ -464,10 +464,31 @@ body::before {
   font-size: 0.88rem;
 }
 
+.field-note,
+.status-note {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  font-size: 0.92rem;
+}
+
+.field-note {
+  color: var(--muted);
+  background: rgba(255, 196, 23, 0.05);
+  border: 1px solid rgba(255, 196, 23, 0.12);
+}
+
+.status-note.is-error {
+  color: #ffd9d3;
+  background: rgba(134, 34, 19, 0.38);
+  border: 1px solid rgba(255, 144, 122, 0.28);
+}
+
 input,
 select,
 textarea,
-.primary-button {
+.primary-button,
+.secondary-button {
   width: 100%;
   font: inherit;
 }
@@ -503,11 +524,40 @@ textarea {
   box-shadow: 0 14px 28px rgba(255, 196, 23, 0.18);
 }
 
+.secondary-button {
+  border: 1px solid rgba(255, 196, 23, 0.24);
+  border-radius: 999px;
+  padding: 1rem 1.2rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.94rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.form-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
 .quote-preview,
 .prep-summary,
 .follow-up-preview {
   display: grid;
   gap: 0.9rem;
+}
+
+.estimate-report {
+  align-content: start;
 }
 
 .preview-total {
@@ -529,6 +579,71 @@ textarea {
   justify-content: space-between;
   gap: 1rem;
   color: var(--muted);
+}
+
+.estimate-section {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.3rem;
+}
+
+.estimate-section h4 {
+  margin: 0;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 1.2rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.estimate-list,
+.estimate-materials {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.estimate-list li {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.estimate-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.estimate-grid div,
+.material-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.estimate-grid div {
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 196, 23, 0.1);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.material-row {
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 196, 23, 0.1);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.material-row strong {
+  display: block;
+}
+
+.material-row p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .check-item {
@@ -681,6 +796,11 @@ textarea {
   .positioning-grid,
   .form-split,
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions,
+  .estimate-grid {
     grid-template-columns: 1fr;
   }
 
