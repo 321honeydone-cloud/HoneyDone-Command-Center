@@ -33,5 +33,6 @@ export const quickLinks = [
 
 export const defaultState = {
   quotes: [],
-  closeouts: []
+  closeouts: [],
+  customClients: []
 };

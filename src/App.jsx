@@ -15,6 +15,13 @@ const blankQuoteForm = {
   urgency: "routine",
   scope: ""
 };
+const blankClientForm = {
+  name: "",
+  address: "",
+  city: "",
+  phone: "",
+  email: ""
+};
 const estimatorSystemPrompt = `You are Handyman Field Estimator for HoneyDone. Think like a field technician and return a complete internal estimate with tools, materials, labor, risks, scope, pricing, and smart add-ons.
 
 Rules:
@@ -316,6 +323,20 @@ function summarizeMedia(files) {
   }));
 }
 
+function dedupeClients(clients) {
+  const seen = new Set();
+
+  return clients.filter((client) => {
+    const key = `${client.name || ""}|${client.address || ""}|${client.phone || ""}|${client.email || ""}`.toLowerCase();
+    if (!key.trim() || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [appState, setAppState] = useState(loadState);
@@ -327,6 +348,9 @@ export default function App() {
   const [estimateResult, setEstimateResult] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateError, setEstimateError] = useState("");
+  const [showClientForm, setShowClientForm] = useState(false);
+  const [newClientForm, setNewClientForm] = useState(blankClientForm);
+  const [clientAddStatus, setClientAddStatus] = useState({ saving: false, error: "", success: "" });
   const [closeoutForm, setCloseoutForm] = useState({
     quoteId: "",
     invoiceTotal: 0,
@@ -479,9 +503,11 @@ export default function App() {
   const selectedSavedQuote = appState.quotes.find((quote) => quote.id === selectedQuoteId) || activeQuote;
   const selectedPrepQuote = selectedSavedQuote || activeQuote;
   const latestCloseout = appState.closeouts[appState.closeouts.length - 1] || null;
+  const customClients = appState.customClients || [];
+  const mergedClients = useMemo(() => dedupeClients([...allClients, ...customClients]), [allClients, customClients]);
   const openQuoteValue = appState.quotes.reduce((sum, quote) => sum + Number(getQuoteTotal(quote)), 0);
-  const reachableClients = allClients.filter((client) => client.phone || client.email).length;
-  const clientOptions = activeClients.length ? activeClients : allClients;
+  const reachableClients = mergedClients.filter((client) => client.phone || client.email).length;
+  const clientOptions = mergedClients;
   const prepChecklistItems = useMemo(() => getQuoteChecklist(selectedPrepQuote), [selectedPrepQuote]);
   const mapsUrl = buildMapsUrl(selectedPrepQuote?.address, currentLocation);
   const mapEmbedUrl = buildMapEmbedUrl(selectedPrepQuote?.address);
@@ -491,11 +517,11 @@ export default function App() {
     ["Quote Clients", clientOptions.length],
     ["Reachable Contacts", reachableClients]
   ];
-  const filteredClients = useMemo(() => allClients.filter((client) => {
+  const filteredClients = useMemo(() => mergedClients.filter((client) => {
     const haystack = [client.name, client.city, client.phone, client.email, client.address].join(" ").toLowerCase();
     return haystack.includes(clientSearch.toLowerCase());
-  }), [allClients, clientSearch]);
-  const dataQualityMessage = allClients.length && !reachableClients
+  }), [mergedClients, clientSearch]);
+  const dataQualityMessage = mergedClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
     : "";
   const jobberNotice = typeof window !== "undefined"
@@ -613,6 +639,7 @@ export default function App() {
     const selectedClient = clientOptions.find((client) => client.name === value);
     setEstimateResult(null);
     setEstimateError("");
+    setClientAddStatus({ saving: false, error: "", success: "" });
 
     if (!selectedClient) {
       setQuoteForm((current) => ({ ...current, activeClient: "" }));
@@ -626,6 +653,11 @@ export default function App() {
       address: selectedClient.address || current.address,
       city: selectedClient.city || extractCity(selectedClient.address) || current.city
     }));
+  };
+
+  const onNewClientField = ({ target: { name, value } }) => {
+    setClientAddStatus({ saving: false, error: "", success: "" });
+    setNewClientForm((current) => ({ ...current, [name]: value }));
   };
 
   const onCloseoutField = ({ target: { name, value } }) => {
@@ -685,6 +717,63 @@ export default function App() {
     if (selectedQuoteId === quoteId) {
       setSelectedQuoteId("");
     }
+  };
+
+  const saveClient = async () => {
+    if (!newClientForm.name.trim()) {
+      setClientAddStatus({ saving: false, error: "Client name is required.", success: "" });
+      return;
+    }
+
+    const client = {
+      name: newClientForm.name.trim(),
+      address: newClientForm.address.trim(),
+      city: newClientForm.city.trim() || extractCity(newClientForm.address),
+      phone: newClientForm.phone.trim(),
+      email: newClientForm.email.trim()
+    };
+
+    setClientAddStatus({ saving: true, error: "", success: "" });
+
+    let successMessage = "Client added to this app.";
+
+    try {
+      const response = await fetch(appsScriptUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "save_client",
+          client
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (response.ok && payload.success !== false) {
+        successMessage = "Client added and sent to the client database.";
+      } else {
+        successMessage = "Client added here. CSV sync still needs a save_client action in Apps Script.";
+      }
+    } catch {
+      successMessage = "Client added here. CSV sync still needs a save_client action in Apps Script.";
+    }
+
+    setAppState((current) => ({
+      ...current,
+      customClients: dedupeClients([...(current.customClients || []), client])
+    }));
+    setQuoteForm((current) => ({
+      ...current,
+      activeClient: client.name,
+      clientName: client.name,
+      address: client.address,
+      city: client.city
+    }));
+    setShowClientForm(false);
+    setNewClientForm(blankClientForm);
+    setClientAddStatus({ saving: false, error: "", success: successMessage });
   };
 
   const generateEstimate = async () => {
@@ -945,14 +1034,30 @@ export default function App() {
         </section>}
 
         {activeTab === "quotes" && <section className="panel is-active">
-          <div className="two-column">
-            <article className="card">
+          <div className="two-column quote-builder-grid">
+            <article className="card quote-editor-card">
               <div className="card-header"><div><p className="section-kicker">Estimator</p><h3>Build an AI field-ready quote</h3></div></div>
               <div className="form-stack">
-                <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
-                <p className="field-note">Stored in this browser only for now. We can move this to a secure serverless setup before public launch.</p>
                 <label><span>Client list</span><select name="activeClient" value={quoteForm.activeClient} onChange={onClientPick}><option value="">Select client...</option>{clientOptions.map((client) => <option key={`${client.name}-${client.address}`} value={client.name}>{client.name}{client.city ? ` - ${client.city}` : ""}</option>)}</select></label>
                 <p className="field-note">Client source: {clientStatus.source}{clientStatus.fallback ? ` - ${clientStatus.fallback}` : ""}</p>
+                <div className="client-inline-actions">
+                  <button className="mini-action mini-action-button" type="button" onClick={() => setShowClientForm((current) => !current)}>{showClientForm ? "Cancel New Client" : "Add New Client"}</button>
+                </div>
+                {showClientForm ? <div className="mini-panel client-create-panel">
+                  <span>New Client</span>
+                  <div className="form-stack">
+                    <label><span>Client name</span><input name="name" value={newClientForm.name} onChange={onNewClientField} placeholder="First Last" /></label>
+                    <label><span>Property address</span><input name="address" value={newClientForm.address} onChange={onNewClientField} placeholder="Address" /></label>
+                    <div className="form-split">
+                      <label><span>City</span><input name="city" value={newClientForm.city} onChange={onNewClientField} placeholder="City" /></label>
+                      <label><span>Phone</span><input name="phone" value={newClientForm.phone} onChange={onNewClientField} placeholder="3215551234" /></label>
+                    </div>
+                    <label><span>Email</span><input name="email" value={newClientForm.email} onChange={onNewClientField} placeholder="customer@email.com" /></label>
+                    {clientAddStatus.error ? <div className="status-note is-error">{clientAddStatus.error}</div> : null}
+                    <button className="secondary-button" type="button" onClick={saveClient} disabled={clientAddStatus.saving}>{clientAddStatus.saving ? "Saving Client..." : "Save Client"}</button>
+                  </div>
+                </div> : null}
+                {clientAddStatus.success ? <p className="field-note">{clientAddStatus.success}</p> : null}
                 <label><span>Customer name</span><input name="clientName" value={quoteForm.clientName} onChange={onQuoteField} placeholder="First Last" required /></label>
                 <label><span>Property address</span><input name="address" value={quoteForm.address} onChange={onQuoteField} placeholder="Address" /></label>
                 <div className="form-split">
@@ -962,13 +1067,9 @@ export default function App() {
                 <label><span>Service category</span><select name="service" value={quoteForm.service} onChange={onQuoteField}><option value="">Not specified</option>{serviceCatalog.map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}</select></label>
                 <label><span>Scope notes</span><textarea name="scope" rows="6" value={quoteForm.scope} onChange={onQuoteField} placeholder="Explain the full job, access issues, damage, customer expectations, and anything that feels uncertain." required /></label>
                 <div className="media-stack">
-                  <label><span>Upload photos or videos</span><input type="file" accept="image/*,video/*" multiple onChange={onQuoteMediaField} /></label>
-                  <div className="form-split">
-                    <label><span>Take photo</span><input type="file" accept="image/*" capture="environment" onChange={onQuoteMediaField} /></label>
-                    <label><span>Take video</span><input type="file" accept="video/*" capture="environment" onChange={onQuoteMediaField} /></label>
-                  </div>
-                  <p className="field-note">Images are included in AI estimate analysis. Videos are attached to the quote for reference; keep them around one minute for easier field review.</p>
-                  {quoteMedia.length ? <div className="media-list">{quoteMedia.map((file, index) => <div className="media-item" key={`${file.name}-${index}`}><div><strong>{file.name}</strong><p>{file.type.startsWith("video/") ? "Video reference" : "Image reference"} - {(file.size / 1024 / 1024).toFixed(1)} MB</p></div><button className="mini-action mini-action-button" type="button" onClick={() => removeQuoteMedia(index)}>Remove</button></div>)}</div> : null}
+                  <label><span>Upload photo or video</span><input type="file" accept="image/*,video/*" capture="environment" multiple onChange={onQuoteMediaField} /></label>
+                  <p className="field-note">Images are included in AI estimate analysis. Videos stay attached to the quote for field reference, so keep them around one minute when possible.</p>
+                  {quoteMedia.length ? <div className="media-list">{quoteMedia.map((file, index) => <div className="media-item" key={`${file.name}-${index}`}><div className="media-item-copy"><strong title={file.name}>{file.name}</strong><p>{file.type.startsWith("video/") ? "Video reference" : "Image reference"} - {(file.size / 1024 / 1024).toFixed(1)} MB</p></div><button className="mini-action mini-action-button" type="button" onClick={() => removeQuoteMedia(index)}>Remove</button></div>)}</div> : null}
                 </div>
                 {estimateError ? <div className="status-note is-error">{estimateError}</div> : null}
                 <div className="form-actions">
@@ -977,8 +1078,9 @@ export default function App() {
                 </div>
               </div>
             </article>
-            <article className="card accent-card">
+            <article className="card accent-card estimate-preview-card">
               <div className="card-header"><div><p className="section-kicker">Estimate Preview</p><h3>AI quote summary</h3></div></div>
+              <div className="estimate-scroll">
               {!estimateResult ? <div className="quote-preview">
                 <span>Waiting on estimate</span>
                 <strong>{quoteForm.clientName || "Client pending"}</strong>
@@ -1006,6 +1108,7 @@ export default function App() {
                 <div className="estimate-section"><h4>Risks / Unknowns</h4><ul className="estimate-list">{estimateResult.riskFlags.map((item) => <li key={item}>{item}</li>)}</ul>{estimateResult.assumptions.length ? <div className="mini-panel"><span>Assumptions</span><p>{estimateResult.assumptions.join(" ")}</p></div> : null}</div>
                 <div className="estimate-section"><h4>Permit Note</h4><p>{estimateResult.permitNote}</p></div>
               </div>}
+              </div>
             </article>
           </div>
           <article className="card">
@@ -1106,7 +1209,7 @@ export default function App() {
               <div className="card-header"><div><p className="section-kicker">Sync Status</p><h3>Client feeds and company shortcuts</h3></div></div>
               <div className="brand-guidelines">
                 <p>Client source: {clientStatus.source}</p>
-                <p>Loaded records: {allClients.length}</p>
+                <p>Loaded records: {mergedClients.length}</p>
                 <p>Jobber status: {jobberStatus.loading ? "Checking..." : jobberStatus.connected ? `Connected${jobberStatus.accountName ? ` to ${jobberStatus.accountName}` : ""}` : jobberStatus.configured ? "Configured but not connected" : "Not configured locally yet"}</p>
                 {jobberNotice === "connected" ? <p>Jobber connected successfully.</p> : null}
                 {jobberNotice === "missing_config" ? <p>{jobberDetail || "Add Jobber credentials to .env, then restart the local server."}</p> : null}
@@ -1114,6 +1217,13 @@ export default function App() {
                 {clientStatus.fallback ? <p>{clientStatus.fallback}</p> : null}
                 {jobberStatus.error ? <p>{jobberStatus.error}</p> : null}
                 {dataQualityMessage ? <p>{dataQualityMessage}</p> : <p>Phone and email data are available for {reachableClients} client records.</p>}
+              </div>
+              <div className="mini-panel">
+                <span>Estimator Setup</span>
+                <div className="form-stack">
+                  <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
+                  <p className="field-note">Set this once here instead of inside the quote builder. It stays in this browser only for now.</p>
+                </div>
               </div>
               <div className="client-actions">
                 <a className="mini-action" href={`${jobberApiBase}/connect`}>Connect Jobber</a>
