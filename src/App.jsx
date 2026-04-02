@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { appsScriptUrl, defaultState, jobberApiBase, quickLinks, serviceCatalog, serviceZones, storageKey } from "./data";
+import { appsScriptUrl, defaultState, quickLinks, serviceCatalog, serviceZones, storageKey } from "./data";
 import logoImage from "./assets/logo-shirt-front.png";
 
 const tabs = ["overview", "quotes", "prep", "closeout", "contacts"];
@@ -323,6 +323,20 @@ function summarizeMedia(files) {
   }));
 }
 
+async function parseJsonResponse(response, fallbackMessage) {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    throw new Error(fallbackMessage);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(fallbackMessage);
+  }
+}
+
 function dedupeClients(clients) {
   const seen = new Set();
 
@@ -363,7 +377,6 @@ export default function App() {
   const [allClients, setAllClients] = useState([]);
   const [clientSearch, setClientSearch] = useState("");
   const [clientStatus, setClientStatus] = useState({ loading: true, error: "", source: "Loading...", fallback: "" });
-  const [jobberStatus, setJobberStatus] = useState({ loading: true, configured: false, connected: false, accountName: "", error: "" });
   const [currentLocation, setCurrentLocation] = useState(null);
   const [locationRequested, setLocationRequested] = useState(false);
   const [routeStatus, setRouteStatus] = useState({ loading: false, error: "", duration: "", distance: "" });
@@ -379,82 +392,23 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadAppsScriptClients() {
-      const response = await fetch(`${appsScriptUrl}?action=get_all_clients`);
-      const data = await response.json();
-
-      if (!response.ok || data.success === false) {
-        throw new Error(data.error || "Client list failed to load.");
-      }
-
-      return data.clients || [];
-    }
-
     async function loadClients() {
-      setClientStatus({ loading: true, error: "", source: "Loading...", fallback: "" });
-      setJobberStatus((current) => ({ ...current, loading: true, error: "" }));
+      setClientStatus({ loading: true, error: "", source: "Apps Script", fallback: "" });
 
       try {
-        let loadedClients = [];
-        let source = "Apps Script";
-        let fallback = "";
+        const response = await fetch(`${appsScriptUrl}?action=get_all_clients`);
+        const data = await parseJsonResponse(response, "Client feed returned an invalid or empty response.");
 
-        try {
-          const statusResponse = await fetch(`${jobberApiBase}/status`);
-          const statusData = await statusResponse.json();
-
-          if (!statusResponse.ok) {
-            throw new Error(statusData.error || "Jobber status unavailable.");
-          }
-
-          if (!cancelled) {
-            setJobberStatus({
-              loading: false,
-              configured: Boolean(statusData.configured),
-              connected: Boolean(statusData.connected),
-              accountName: statusData.accountName || "",
-              error: ""
-            });
-          }
-
-          if (statusData.configured && statusData.connected) {
-            const clientResponse = await fetch(`${jobberApiBase}/clients`);
-            const clientData = await clientResponse.json();
-
-            if (!clientResponse.ok || clientData.success === false) {
-              throw new Error(clientData.error || "Jobber client sync failed.");
-            }
-
-            loadedClients = clientData.clients || [];
-            source = "Jobber";
-            fallback = clientData.fallbackReason ? `Address fallback used: ${clientData.fallbackReason}` : "";
-          } else {
-            loadedClients = await loadAppsScriptClients();
-            source = "Apps Script";
-            fallback = statusData.configured
-              ? "Jobber is configured but not connected yet. Using Apps Script until you connect it."
-              : "Jobber is not configured yet. Using Apps Script for now.";
-          }
-        } catch (jobberError) {
-          loadedClients = await loadAppsScriptClients();
-          source = "Apps Script";
-          fallback = jobberError.message || "Jobber is unavailable, so Apps Script is being used.";
-
-          if (!cancelled) {
-            setJobberStatus({
-              loading: false,
-              configured: false,
-              connected: false,
-              accountName: "",
-              error: fallback
-            });
-          }
+        if (!response.ok || data.success === false) {
+          throw new Error(data.error || "Client list failed to load.");
         }
+
+        const loadedClients = data.clients || [];
 
         if (!cancelled) {
           setActiveClients(loadedClients);
           setAllClients(loadedClients);
-          setClientStatus({ loading: false, error: "", source, fallback });
+          setClientStatus({ loading: false, error: "", source: "Apps Script", fallback: "" });
         }
       } catch (error) {
         if (!cancelled) {
@@ -464,7 +418,6 @@ export default function App() {
             source: "Unavailable",
             fallback: ""
           });
-          setJobberStatus((current) => ({ ...current, loading: false, error: current.error || error.message || "Client sync failed." }));
         }
       }
     }
@@ -523,12 +476,6 @@ export default function App() {
   }), [mergedClients, clientSearch]);
   const dataQualityMessage = mergedClients.length && !reachableClients
     ? "Client sync is live, but phone and email fields are empty in the current Apps Script response."
-    : "";
-  const jobberNotice = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("jobber")
-    : "";
-  const jobberDetail = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("jobber_detail")
     : "";
 
   useEffect(() => {
@@ -749,7 +696,7 @@ export default function App() {
         })
       });
 
-      const payload = await response.json().catch(() => ({}));
+      const payload = await parseJsonResponse(response, "").catch(() => ({}));
 
       if (response.ok && payload.success !== false) {
         successMessage = "Client added and sent to the client database.";
@@ -953,15 +900,29 @@ export default function App() {
         })
       });
 
-      const result = await response.json();
+      const result = await parseJsonResponse(response, "").catch(() => ({}));
       if (!response.ok || result.success === false) {
         throw new Error(result.error || "Closeout sync failed.");
       }
     } catch (error) {
+      const closeout = {
+        quoteId: quote.id,
+        clientName: quote.clientName,
+        service: quote.service,
+        invoiceTotal: Number(closeoutForm.invoiceTotal || getQuoteTotal(quote)),
+        actualHours: Number(closeoutForm.actualHours || getQuoteHours(quote)),
+        completionNote: closeoutForm.completionNote || "Completed scope, verified operation, and cleaned up work area."
+      };
+      setAppState((current) => ({
+        quotes: current.quotes.filter((item) => item.id !== quote.id),
+        closeouts: [...current.closeouts, closeout]
+      }));
+      setCloseoutForm({ quoteId: "", invoiceTotal: 0, actualHours: 2, completionNote: "" });
+      setCloseoutPhotos({ before: null, after: null });
       setCloseoutStatus({
         saving: false,
-        error: error.message || "Closeout sync failed.",
-        success: ""
+        error: "",
+        success: `Closeout saved locally. Remote sync is unavailable right now: ${error.message || "Closeout sync failed."}`
       });
       return;
     }
@@ -1210,12 +1171,7 @@ export default function App() {
               <div className="brand-guidelines">
                 <p>Client source: {clientStatus.source}</p>
                 <p>Loaded records: {mergedClients.length}</p>
-                <p>Jobber status: {jobberStatus.loading ? "Checking..." : jobberStatus.connected ? `Connected${jobberStatus.accountName ? ` to ${jobberStatus.accountName}` : ""}` : jobberStatus.configured ? "Configured but not connected" : "Not configured locally yet"}</p>
-                {jobberNotice === "connected" ? <p>Jobber connected successfully.</p> : null}
-                {jobberNotice === "missing_config" ? <p>{jobberDetail || "Add Jobber credentials to .env, then restart the local server."}</p> : null}
-                {jobberNotice === "error" ? <p>{jobberDetail || "Jobber connection failed."}</p> : null}
                 {clientStatus.fallback ? <p>{clientStatus.fallback}</p> : null}
-                {jobberStatus.error ? <p>{jobberStatus.error}</p> : null}
                 {dataQualityMessage ? <p>{dataQualityMessage}</p> : <p>Phone and email data are available for {reachableClients} client records.</p>}
               </div>
               <div className="mini-panel">
@@ -1224,9 +1180,6 @@ export default function App() {
                   <label><span>OpenAI API key</span><input name="apiKey" type="password" value={openAiKey} onChange={(event) => setOpenAiKey(event.target.value)} placeholder="sk-..." /></label>
                   <p className="field-note">Set this once here instead of inside the quote builder. It stays in this browser only for now.</p>
                 </div>
-              </div>
-              <div className="client-actions">
-                <a className="mini-action" href={`${jobberApiBase}/connect`}>Connect Jobber</a>
               </div>
               <div className="quick-links">{quickLinks.map((item) => <a className="quick-link" href={item.href} key={item.label} target={item.href.startsWith("http") ? "_blank" : undefined} rel={item.href.startsWith("http") ? "noreferrer" : undefined}><div><span>{item.meta}</span><strong>{item.label}</strong></div><em>Open</em></a>)}</div>
             </article>
